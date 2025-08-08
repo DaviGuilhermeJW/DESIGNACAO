@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Designações Mecânicas</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-900">
+  <div class="max-w-5xl mx-auto p-6">
+    <!-- Cabeçalho -->
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+      <h1 class="text-2xl font-bold">Designações Mecânicas</h1>
+      <div class="flex gap-2">
+        <button id="btnToggleForm" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">Nova Designação</button>
+        <button id="btnExport" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg">Exportar CSV</button>
+        <button id="btnClear" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Limpar Tudo</button>
+      </div>
+    </header>
+
+    <!-- Formulário -->
+    <form id="form" class="hidden grid md:grid-cols-4 gap-3 bg-white p-4 rounded-lg shadow-md mb-4" onsubmit="return false;">
+      <input id="inputTarefa" placeholder="Descrição da tarefa" class="border border-gray-300 rounded-lg px-3 py-2" required />
+      <input id="inputResp" placeholder="Responsável" class="border border-gray-300 rounded-lg px-3 py-2" />
+      <input id="inputPrazo" type="date" class="border border-gray-300 rounded-lg px-3 py-2" />
+      <select id="inputPrioridade" class="border border-gray-300 rounded-lg px-3 py-2">
+        <option value="">Prioridade...</option>
+        <option value="Alta">Alta</option>
+        <option value="Média">Média</option>
+        <option value="Baixa">Baixa</option>
+      </select>
+      <div class="col-span-4 flex justify-end gap-2">
+        <button id="btnSalvar" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">Salvar</button>
+        <button id="btnCancelar" type="button" class="px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-lg">Cancelar</button>
+      </div>
+    </form>
+
+    <!-- Mensagem inicial -->
+    <div id="msg" class="text-gray-500 italic">Nenhuma designação encontrada.</div>
+
+    <!-- Lista -->
+    <div id="lista" class="overflow-x-auto"></div>
+  </div>
+
+  <script>
+    const qs = s => document.querySelector(s);
+    const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+    const btnToggleForm = qs('#btnToggleForm');
+    const form = qs('#form');
+    const inputTarefa = qs('#inputTarefa');
+    const inputResp = qs('#inputResp');
+    const inputPrazo = qs('#inputPrazo');
+    const inputPrioridade = qs('#inputPrioridade');
+    const btnSalvar = qs('#btnSalvar');
+    const btnCancelar = qs('#btnCancelar');
+    const listaEl = qs('#lista');
+    const msgEl = qs('#msg');
+    const btnExport = qs('#btnExport');
+    const btnClear = qs('#btnClear');
+
+    let tarefas = [];
+    let editId = null;
+    const STORAGE_KEY = 'designacoes_mecanicas_v1';
+
+    function carregar() {
+      try {
+        tarefas = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+      } catch { tarefas = []; }
+      render();
+    }
+
+    function salvarStorage() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tarefas));
+    }
+
+    function render() {
+      if (tarefas.length === 0) {
+        listaEl.innerHTML = '';
+        msgEl.classList.remove('hidden');
+        return;
+      }
+      msgEl.classList.add('hidden');
+      let html = `
+        <table class="min-w-full bg-white rounded-lg shadow-md overflow-hidden">
+          <thead class="bg-gray-200 text-gray-700">
+            <tr>
+              <th class="py-2 px-4 text-left">Tarefa</th>
+              <th class="py-2 px-4 text-left">Responsável</th>
+              <th class="py-2 px-4 text-left">Prazo</th>
+              <th class="py-2 px-4 text-left">Prioridade</th>
+              <th class="py-2 px-4 text-left">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+      for (const t of tarefas) {
+        const prazoFmt = t.prazo ? new Date(t.prazo).toLocaleDateString() : '';
+        html += `
+          <tr class="border-b">
+            <td class="py-2 px-4">${escapeHtml(t.tarefa)}</td>
+            <td class="py-2 px-4">${escapeHtml(t.responsavel || '')}</td>
+            <td class="py-2 px-4">${prazoFmt}</td>
+            <td class="py-2 px-4">${escapeHtml(t.prioridade || '')}</td>
+            <td class="py-2 px-4 space-x-2">
+              <button data-act="editar" class="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded">Editar</button>
+              <button data-act="excluir" class="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded">Excluir</button>
+            </td>
+          </tr>
+        `;
+      }
+      html += '</tbody></table>';
+      listaEl.innerHTML = html;
+
+      listaEl.querySelectorAll('button').forEach(b => {
+        const tr = b.closest('tr');
+        const tid = tarefas[Array.from(tr.parentNode.children).indexOf(tr)].id;
+        if (b.dataset.act === 'editar') b.onclick = () => startEditar(tid);
+        if (b.dataset.act === 'excluir') b.onclick = () => excluir(tid);
+      });
+    }
+
+    function adicionarOuAtualizar() {
+      const tarefa = inputTarefa.value.trim();
+      if (!tarefa) return alert('Preencha a descrição da tarefa.');
+      const responsavel = inputResp.value.trim();
+      const prazo = inputPrazo.value || '';
+      const prioridade = inputPrioridade.value || '';
+      if (editId) {
+        const idx = tarefas.findIndex(x => x.id === editId);
+        if (idx > -1) tarefas[idx] = {...tarefas[idx], tarefa, responsavel, prazo, prioridade};
+        editId = null;
+      } else {
+        tarefas.unshift({id: id(), tarefa, responsavel, prazo, prioridade});
+      }
+      salvarStorage();
+      limparForm();
+      fecharForm();
+      render();
+    }
+
+    function startEditar(tid) {
+      const t = tarefas.find(x => x.id === tid);
+      if (!t) return;
+      editId = t.id;
+      inputTarefa.value = t.tarefa;
+      inputResp.value = t.responsavel || '';
+      inputPrazo.value = t.prazo || '';
+      inputPrioridade.value = t.prioridade || '';
+      abrirForm();
+    }
+
+    function excluir(tid) {
+      if (!confirm('Excluir esta designação?')) return;
+      tarefas = tarefas.filter(x => x.id !== tid);
+      salvarStorage();
+      render();
+    }
+
+    function limparForm() {
+      editId = null;
+      inputTarefa.value = '';
+      inputResp.value = '';
+      inputPrazo.value = '';
+      inputPrioridade.value = '';
+    }
+
+    function abrirForm() { form.classList.remove('hidden'); inputTarefa.focus(); }
+    function fecharForm() { form.classList.add('hidden'); limparForm(); }
+    btnToggleForm.onclick = () => form.classList.contains('hidden') ? abrirForm() : fecharForm();
+    btnCancelar.onclick = fecharForm;
+    btnSalvar.onclick = adicionarOuAtualizar;
+
+    function exportCSV() {
+      if (tarefas.length === 0) return alert('Nenhuma designação para exportar.');
+      const headers = ['Tarefa','Responsável','Prazo','Prioridade'];
+      const rows = tarefas.map(t => [
+        t.tarefa, t.responsavel || '', t.prazo || '', t.prioridade || ''
+      ]);
+      const esc = v => `"${String(v || '').replace(/"/g,'""')}"`;
+      const csv = [headers.map(esc).join(','), ...rows.map(r=>r.map(esc).join(','))].join('\r\n');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'designacoes_mecanicas.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+    btnExport.onclick = exportCSV;
+
+    btnClear.onclick = () => {
+      if (!confirm('Apagar todas as designações salvas?')) return;
+      tarefas = []; salvarStorage(); render();
+    };
+
+    function escapeHtml(s){
+      return String(s||'').replace(/[&<>"'`]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'})[c]);
+    }
+
+    carregar();
+  </script>
+</body>
+</html>
